@@ -1,10 +1,11 @@
 use super::skiplist::{KeyComparator, SkipList, SkipListIterator};
 use crate::dbformat::{InternalKeyComparator, LookupKey, SequenceNumber, ValueType};
+use crate::iterator::Iterator;
 use crate::util::{
     decode_fixed64, decode_varint32, encode_fixed64, encode_varint32, put_varint32, varint_length,
     DBError, Result,
 };
-use crate::Iterator;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::intrinsics::copy_nonoverlapping;
 use std::ptr::null;
@@ -99,15 +100,15 @@ impl<'a> Iterator for MemTableIterator<'a> {
     }
 }
 
-struct MemTable {
+pub struct MemTable {
     table: SkipList<*const u8, MemTableKeyComparator>,
 }
 
 impl MemTable {
-    pub fn new(comparator: InternalKeyComparator) -> Rc<Self> {
-        Rc::new(Self {
+    pub fn new(comparator: InternalKeyComparator) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self {
             table: SkipList::new(MemTableKeyComparator { comparator }, null()),
-        })
+        }))
     }
     pub fn approximate_memory_usage(&self) -> usize {
         self.table.arena.memory_usage()

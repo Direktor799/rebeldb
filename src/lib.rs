@@ -2,5 +2,7 @@ mod dbformat;
 mod iterator;
 mod memtable;
 mod util;
+mod write_batch;
 
-pub use iterator::Iterator;
+use dbformat::ParsedInternalKey;
+use util::{DBError, Result};

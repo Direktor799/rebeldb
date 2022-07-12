@@ -28,7 +28,7 @@ impl From<u8> for ValueType {
 
 pub const VALUE_TYPE_FOR_SEEK: ValueType = ValueType::Value;
 
-struct ParsedInternalKey<'a> {
+pub struct ParsedInternalKey<'a> {
     user_key: &'a [u8],
     sequence: SequenceNumber,
     type_: ValueType,
@@ -42,26 +42,38 @@ impl<'a> ParsedInternalKey<'a> {
             type_,
         }
     }
-}
 
-/// Append the serialization of "key" to dst.
-fn append_internal_key(dst: &mut Vec<u8>, key: &ParsedInternalKey) {
-    dst.extend_from_slice(key.user_key);
-    put_fixed64(dst, key.sequence << 8 | key.type_ as u64);
-}
-
-/// Attempt to parse an internal key from "internal_key".
-fn parse_internal_key(internal_key: &[u8]) -> Option<ParsedInternalKey> {
-    let n = internal_key.len();
-    if n < 8 {
-        return None;
+    /// Attempt to parse an internal key from "internal_key".
+    pub fn parse(internal_key: &[u8]) -> Option<ParsedInternalKey> {
+        let n = internal_key.len();
+        if n < 8 {
+            return None;
+        }
+        let num = decode_fixed64(&internal_key[n - 8..]);
+        Some(ParsedInternalKey::new(
+            unsafe { slice::from_raw_parts(internal_key.as_ptr(), n - 8) },
+            num >> 8,
+            (num as u8).into(),
+        ))
     }
-    let num = decode_fixed64(&internal_key[n - 8..]);
-    Some(ParsedInternalKey::new(
-        unsafe { slice::from_raw_parts(internal_key.as_ptr(), n - 8) },
-        num >> 8,
-        (num as u8).into(),
-    ))
+
+    /// Append the serialization of "key" to dst.
+    pub fn append_to(&self, dst: &mut Vec<u8>) {
+        dst.extend_from_slice(self.user_key);
+        put_fixed64(dst, self.sequence << 8 | self.type_ as u64);
+    }
+
+    pub fn user_key(&self) -> &[u8] {
+        self.user_key
+    }
+
+    pub fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn type_(&self) -> ValueType {
+        self.type_
+    }
 }
 
 fn extract_user_key(internal_key: &[u8]) -> &[u8] {
@@ -188,7 +200,7 @@ impl InternalKey {
 
     pub fn new(user_key: &[u8], seq: SequenceNumber, type_: ValueType) -> Self {
         let mut rep = vec![];
-        append_internal_key(&mut rep, &ParsedInternalKey::new(user_key, seq, type_));
+        ParsedInternalKey::new(user_key, seq, type_).append_to(&mut rep);
         Self { rep }
     }
 
@@ -280,17 +292,11 @@ mod tests {
         util::{BytewiseComparator, Comparator},
     };
 
-    use super::{
-        append_internal_key, parse_internal_key, InternalKey, InternalKeyComparator,
-        ParsedInternalKey, SequenceNumber, ValueType,
-    };
+    use super::{InternalKey, InternalKeyComparator, ParsedInternalKey, SequenceNumber, ValueType};
 
     fn ikey(user_key: &[u8], seq: SequenceNumber, type_: ValueType) -> Vec<u8> {
         let mut encoded = vec![];
-        append_internal_key(
-            &mut encoded,
-            &super::ParsedInternalKey::new(user_key, seq, type_),
-        );
+        ParsedInternalKey::new(user_key, seq, type_).append_to(&mut encoded);
         encoded
     }
 
@@ -305,7 +311,7 @@ mod tests {
 
     fn test_key(user_key: &[u8], seq: SequenceNumber, type_: ValueType) {
         let encoded = ikey(user_key, seq, type_);
-        let decoded = parse_internal_key(&encoded).unwrap();
+        let decoded = ParsedInternalKey::parse(&encoded).unwrap();
         assert_eq!(user_key, decoded.user_key);
         assert_eq!(seq, decoded.sequence);
         assert_eq!(type_, decoded.type_);

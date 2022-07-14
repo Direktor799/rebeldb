@@ -30,6 +30,7 @@ pub trait Env {
     fn rename_file(&self, src: &str, target: &str) -> Result<()>;
     fn lock_file(&self, fname: &str) -> Result<Box<dyn FileLock>>;
     fn unlock_file(&self, lock: Box<dyn FileLock>) -> Result<()>;
+    fn new_logger(&self, fname: &str) -> Result<Box<dyn Logger + '_>>;
     // todo: more
     // fn schedule(function: Box<dyn FnMut()>);
 }
@@ -56,6 +57,11 @@ pub trait WritableFile {
 }
 
 pub trait FileLock {}
+
+pub trait Logger {
+    // todo
+    fn log(&self, info: &str);
+}
 
 fn write_data_to_file_inner(
     env: Arc<dyn Env>,

@@ -1,6 +1,17 @@
-use super::{Env, FileLock, RandomAccessFile, SequentialFile, WritableFile};
+use super::{Env, FileLock, Logger, RandomAccessFile, SequentialFile, WritableFile};
 use crate::util::{DBError, Result};
-use std::{ffi::OsString, fs, io, path::Path};
+use chrono::Local;
+use std::{
+    cell::RefCell,
+    ffi::OsString,
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
+    mem::MaybeUninit,
+    path::Path,
+    ptr::null_mut,
+    thread::{self, ThreadId},
+    time,
+};
 
 pub struct PosixEnv {}
 
@@ -75,8 +86,21 @@ impl Env for PosixEnv {
     fn lock_file(&self, fname: &str) -> Result<Box<dyn FileLock>> {
         todo!()
     }
+
     fn unlock_file(&self, lock: Box<dyn FileLock>) -> Result<()> {
         todo!()
+    }
+
+    fn new_logger(&self, fname: &str) -> Result<Box<dyn Logger + '_>> {
+        match OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(fname)
+        {
+            Ok(file) => Ok(Box::new(PosixLogger::new(file))),
+            Err(error) => return Err(to_db_error(fname, error)),
+        }
     }
 }
 
@@ -105,5 +129,33 @@ impl WritableFile for PosixWritableFile {
 
     fn sync(&mut self) -> Result<()> {
         todo!()
+    }
+}
+
+struct PosixLogger {
+    file: RefCell<File>,
+}
+
+impl PosixLogger {
+    fn new(file: File) -> Self {
+        Self {
+            file: RefCell::new(file),
+        }
+    }
+}
+
+impl Logger for PosixLogger {
+    fn log(&self, info: &str) {
+        // Record the time as close to the Logv() call as possible.
+        let time = Local::now().format("%Y/%m/%d-%H:%M:%S%.6f").to_string();
+        // Record the thread ID.
+        let thread_id = thread::current().id();
+        let mut info = format!("{} {:?} {}", time, thread_id, info);
+        if info.chars().last().unwrap() != '\n' {
+            info += "\n";
+        }
+        let mut file_inner = self.file.borrow_mut();
+        file_inner.write(info.as_bytes()).unwrap();
+        file_inner.flush().unwrap();
     }
 }

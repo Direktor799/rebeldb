@@ -1,6 +1,7 @@
 mod arena;
 mod coding;
 mod comparator;
+mod crc32c;
 mod filter_policy;
 mod hash;
 mod random;

@@ -7,6 +7,7 @@ mod hash;
 mod random;
 mod result;
 
+pub use self::crc32c::*;
 pub use arena::Arena;
 pub use coding::*;
 pub use comparator::{BytewiseComparator, Comparator};

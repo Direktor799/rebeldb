@@ -9,6 +9,7 @@ pub type SequenceNumber = u64;
 pub const MAX_SEQUENCE_NUMBER: u64 = (1 << 56) - 1;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[repr(u8)]
 pub enum ValueType {
     Deletion = 0x0,
     Value = 0x1,
@@ -16,12 +17,10 @@ pub enum ValueType {
 
 impl From<u8> for ValueType {
     fn from(value: u8) -> Self {
-        if value == 0x0 {
-            Self::Deletion
-        } else if value == 0x1 {
-            Self::Value
-        } else {
-            panic!()
+        match value {
+            0x0 => Self::Deletion,
+            0x1 => Self::Value,
+            _ => panic!(),
         }
     }
 }

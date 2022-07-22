@@ -37,7 +37,7 @@ pub trait Env {
 
 /// A file abstraction for reading sequentially through a file
 pub trait SequentialFile {
-    fn read(&mut self, dst: &mut [u8]) -> Result<()>;
+    fn read(&mut self, dst: &mut [u8]) -> Result<usize>;
     fn skip(&mut self, n: usize) -> Result<()>;
 }
 

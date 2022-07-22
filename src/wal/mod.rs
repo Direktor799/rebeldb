@@ -1,7 +1,7 @@
-// mod reader;
+mod reader;
 mod writer;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 #[repr(u8)]
 enum RecordType {
     Zero = 0,

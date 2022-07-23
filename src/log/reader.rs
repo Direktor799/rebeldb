@@ -1,6 +1,6 @@
-use std::{ops::Range, slice::from_raw_parts};
+use std::{cell::RefCell, ops::Range, rc::Rc, slice::from_raw_parts};
 
-use super::{RecordType, BLOCK_SIZE, HEADER_SIZE, MAX_RECORD_TYPE};
+use super::{RecordType, BLOCK_SIZE, HEADER_SIZE};
 use crate::{
     env::SequentialFile,
     util::{crc32c, crc32c_unmask, decode_fixed32, DBError},
@@ -9,13 +9,13 @@ use crate::{
 #[derive(Debug)]
 #[repr(u8)]
 enum ExtendRecordType {
-    Eof = MAX_RECORD_TYPE as u8 + 1,
-    BadRecord = MAX_RECORD_TYPE as u8 + 2,
+    Eof,
+    BadRecord,
 }
 
-struct Reader {
-    file: Box<dyn SequentialFile>,
-    reporter: Option<Box<dyn Reporter>>,
+pub struct Reader {
+    file: Rc<RefCell<dyn SequentialFile>>,
+    reporter: Option<Rc<RefCell<dyn Reporter>>>,
     checksum: bool,
     backing_store: [u8; BLOCK_SIZE],
     scratch: Vec<u8>,
@@ -34,10 +34,10 @@ struct Reader {
 
 impl Reader {
     pub fn new(
-        file: Box<dyn SequentialFile>,
+        file: Rc<RefCell<dyn SequentialFile>>,
         initial_offset: usize,
         checksum: bool,
-        reporter: Option<Box<dyn Reporter>>,
+        reporter: Option<Rc<RefCell<dyn Reporter>>>,
     ) -> Self {
         Self {
             file,
@@ -71,8 +71,10 @@ impl Reader {
             // ReadPhysicalRecord may have only had an empty trailer remaining in its
             // internal buffer. Calculate the offset of the next physical record now
             // that it has returned, properly accounting for its header size.
-            let physical_record_offset =
-                self.end_of_buffer_offset - self.buffer_range.len() - HEADER_SIZE - fragment.len();
+            let physical_record_offset = self.end_of_buffer_offset as isize
+                - self.buffer_range.len() as isize
+                - HEADER_SIZE as isize
+                - fragment.len() as isize;
             if let Ok(record_type) = result.0 {
                 if self.resyncing {
                     match record_type {
@@ -91,7 +93,8 @@ impl Reader {
                     if in_fragmented_record && !self.scratch.is_empty() {
                         self.report_corruption(self.scratch.len(), "partial record without end(1)");
                     }
-                    prospective_record_offset = physical_record_offset;
+                    assert!(physical_record_offset >= 0);
+                    prospective_record_offset = physical_record_offset as usize;
                     self.scratch.clear();
                     self.last_record_offset = prospective_record_offset;
                     return Some(&fragment);
@@ -100,7 +103,8 @@ impl Reader {
                     if in_fragmented_record && !self.scratch.is_empty() {
                         self.report_corruption(self.scratch.len(), "partial record without end(2)");
                     }
-                    prospective_record_offset = physical_record_offset;
+                    assert!(physical_record_offset >= 0);
+                    prospective_record_offset = physical_record_offset as usize;
                     self.scratch = fragment.to_vec();
                     in_fragmented_record = true;
                 }
@@ -175,7 +179,8 @@ impl Reader {
         self.end_of_buffer_offset = block_start_location;
         // Skip to start of first block that can contain the initial record
         if block_start_location > 0 {
-            if let Err(error) = self.file.skip(block_start_location) {
+            let result = self.file.borrow_mut().skip(block_start_location);
+            if let Err(error) = result {
                 self.report_drop(block_start_location, &error);
                 return false;
             }
@@ -189,7 +194,7 @@ impl Reader {
                 if !self.eof {
                     // Last read was a full read, so this is a trailer to skip
                     self.buffer_range = 0..0;
-                    let result = self.file.read(&mut self.backing_store);
+                    let result = self.file.borrow_mut().read(&mut self.backing_store);
                     let read_size = *result.as_ref().unwrap_or(&0);
                     self.buffer_range = 0..read_size;
                     self.end_of_buffer_offset += self.buffer_range.len();
@@ -280,9 +285,16 @@ impl Reader {
 
     fn report_drop(&mut self, bytes: usize, reason: &DBError) {
         if self.reporter.is_some()
-            && self.end_of_buffer_offset - self.buffer_range.len() - bytes >= self.initial_offset
+            && self
+                .end_of_buffer_offset
+                .wrapping_sub(self.buffer_range.len() + bytes)
+                >= self.initial_offset
         {
-            self.reporter.as_mut().unwrap().corruption(bytes, reason)
+            self.reporter
+                .as_mut()
+                .unwrap()
+                .borrow_mut()
+                .corruption(bytes, reason)
         }
     }
 }

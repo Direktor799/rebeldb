@@ -1,6 +1,9 @@
+// TODO: refactor this later
 use std::{error::Error, fmt::Display};
 
-#[derive(Debug, Clone, PartialEq)]
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Error)]
 enum Code {
     NotFound = 1,
     Corruption = 2,
@@ -97,9 +100,8 @@ pub type Result<T> = std::result::Result<T, DBError>;
 
 #[cfg(test)]
 mod tests {
-    use crate::util::result::DBError;
-
     use super::Result;
+    use crate::util::result::DBError;
 
     #[test]
     fn test_result_move() {

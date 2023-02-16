@@ -1,9 +1,9 @@
 use crate::{
-    dbformat::{SequenceNumber, ValueType},
+    dbformat::ValueType,
     memtable::MemTable,
     util::{
-        decode_fixed32, decode_fixed64, decode_length_prefixed_slice, encode_fixed32,
-        encode_fixed64, put_length_prefixed_slice,
+        decode_fixed32, decode_fixed64, decode_size_prefixed_slice, encode_fixed32, encode_fixed64,
+        extend_size_prefixed_slice,
     },
     DBError, Result,
 };
@@ -17,12 +17,12 @@ pub trait WriteBatchHandler {
 }
 
 struct MemTableInserter<'a> {
-    sequence: SequenceNumber,
+    sequence: u64,
     mem: &'a mut MemTable,
 }
 
 impl<'a> MemTableInserter<'a> {
-    fn new(sequence: SequenceNumber, mem: &'a mut MemTable) -> Self {
+    fn new(sequence: u64, mem: &'a mut MemTable) -> Self {
         Self { sequence, mem }
     }
 }
@@ -53,14 +53,14 @@ impl WriteBatch {
     pub fn put(&mut self, key: &[u8], value: &[u8]) {
         self.set_count(self.count() + 1);
         self.rep.push(ValueType::Value as u8);
-        put_length_prefixed_slice(&mut self.rep, key);
-        put_length_prefixed_slice(&mut self.rep, value);
+        extend_size_prefixed_slice(&mut self.rep, key);
+        extend_size_prefixed_slice(&mut self.rep, value);
     }
 
     pub fn delete(&mut self, key: &[u8]) {
         self.set_count(self.count() + 1);
         self.rep.push(ValueType::Deletion as u8);
-        put_length_prefixed_slice(&mut self.rep, key);
+        extend_size_prefixed_slice(&mut self.rep, key);
     }
 
     pub fn clear(&mut self) {
@@ -91,14 +91,14 @@ impl WriteBatch {
             index += 1;
             match tag.into() {
                 ValueType::Value => {
-                    let key = match decode_length_prefixed_slice(&self.rep[index..]) {
+                    let key = match decode_size_prefixed_slice(&self.rep[index..]) {
                         Some((key, offset)) => {
                             index += offset;
                             key
                         }
                         None => return Err(DBError::corruption("bad WriteBatch Put")),
                     };
-                    let value = match decode_length_prefixed_slice(&self.rep[index..]) {
+                    let value = match decode_size_prefixed_slice(&self.rep[index..]) {
                         Some((value, offset)) => {
                             index += offset;
                             value
@@ -108,7 +108,7 @@ impl WriteBatch {
                     handler.put(key, value);
                 }
                 ValueType::Deletion => {
-                    let key = match decode_length_prefixed_slice(&self.rep[index..]) {
+                    let key = match decode_size_prefixed_slice(&self.rep[index..]) {
                         Some((key, offset)) => {
                             index += offset;
                             key
@@ -135,11 +135,11 @@ impl WriteBatch {
         encode_fixed32(&mut self.rep[8..], n)
     }
 
-    pub(crate) fn sequence(&self) -> SequenceNumber {
+    pub(crate) fn sequence(&self) -> u64 {
         decode_fixed64(&self.rep)
     }
 
-    pub(crate) fn set_sequence(&mut self, seq: SequenceNumber) {
+    pub(crate) fn set_sequence(&mut self, seq: u64) {
         encode_fixed64(&mut self.rep, seq)
     }
 
@@ -165,13 +165,12 @@ impl WriteBatch {
 mod tests {
     use std::str::from_utf8;
 
+    use super::WriteBatch;
     use crate::{
         dbformat::{InternalKeyComparator, ParsedInternalKey, ValueType},
         memtable::MemTable,
         util::BytewiseComparator,
     };
-
-    use super::WriteBatch;
 
     fn print_contents(b: &WriteBatch) -> String {
         let cmp = InternalKeyComparator::new(Box::new(BytewiseComparator::new()));

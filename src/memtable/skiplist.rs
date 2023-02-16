@@ -1,11 +1,10 @@
 use std::{
-    cmp,
-    mem::size_of,
-    ptr::null,
+    cmp, mem, ptr,
     sync::atomic::{self, AtomicPtr, AtomicUsize},
 };
 
-use crate::util::{Arena, Random};
+use super::arena::Arena;
+use crate::util::Random;
 
 const MAX_HEIGHT: usize = 12;
 const BRANCHING: u32 = 4;
@@ -21,36 +20,28 @@ struct Node<Key> {
 }
 
 impl<Key> Node<Key> {
-    pub fn next(&self, height: usize) -> *mut Node<Key> {
-        unsafe {
-            self.next
-                .get_unchecked(height)
-                .load(atomic::Ordering::Acquire)
-        }
+    pub unsafe fn next(&self, height: usize) -> *mut Node<Key> {
+        self.next
+            .get_unchecked(height)
+            .load(atomic::Ordering::Acquire)
     }
 
-    pub fn set_next(&mut self, height: usize, next: *mut Node<Key>) {
-        unsafe {
-            self.next
-                .get_unchecked(height)
-                .store(next, atomic::Ordering::Release)
-        }
+    pub unsafe fn set_next(&mut self, height: usize, next: *mut Node<Key>) {
+        self.next
+            .get_unchecked(height)
+            .store(next, atomic::Ordering::Release)
     }
 
-    pub fn no_barrier_next(&self, height: usize) -> *mut Node<Key> {
-        unsafe {
-            self.next
-                .get_unchecked(height)
-                .load(atomic::Ordering::Relaxed)
-        }
+    pub unsafe fn no_barrier_next(&self, height: usize) -> *mut Node<Key> {
+        self.next
+            .get_unchecked(height)
+            .load(atomic::Ordering::Relaxed)
     }
 
-    pub fn no_barrier_set_next(&mut self, height: usize, next: *mut Node<Key>) {
-        unsafe {
-            self.next
-                .get_unchecked(height)
-                .store(next, atomic::Ordering::Relaxed)
-        }
+    pub unsafe fn no_barrier_set_next(&mut self, height: usize, next: *mut Node<Key>) {
+        self.next
+            .get_unchecked(height)
+            .store(next, atomic::Ordering::Relaxed)
     }
 
     pub fn key(&self) -> &Key {
@@ -66,49 +57,49 @@ pub struct SkipList<Key, C: KeyComparator<Key>> {
 }
 
 impl<Key, C: KeyComparator<Key>> SkipList<Key, C> {
-    pub fn new(comparator: C, root_key: Key) -> Self {
+    /// requires a dummy value since there is no `Default` for raw pointers
+    pub fn new(comparator: C, dummy: Key) -> Self {
         let mut result = Self {
             comparator,
             arena: Arena::new(),
-            head: null(),
+            head: ptr::null(),
             max_height: AtomicUsize::new(1),
             rnd: Random::new(0xdeadbeef),
         };
-        result.head = result.new_node(root_key, MAX_HEIGHT);
+        result.head = result.new_node(dummy, MAX_HEIGHT);
         result
     }
 
     pub fn insert(&mut self, key: Key) {
-        let mut prev = [null::<Node<Key>>(); MAX_HEIGHT];
-        let result = self.find_greater_or_equal(&key, Some(&mut prev));
-        assert!(result.is_null() || !self.equal(&key, unsafe { result.as_ref().unwrap() }.key()));
+        let mut prev = [ptr::null::<Node<Key>>(); MAX_HEIGHT];
+        let _ = self.find_greater_or_equal(&key, Some(&mut prev));
         let height = self.random_height();
+
         if height > self.get_max_height() {
             for i in self.get_max_height()..height {
                 prev[i] = self.head;
             }
-            self.max_height.store(height, atomic::Ordering::Relaxed);
+            self.max_height.store(height, atomic::Ordering::Release);
         }
+
         let new_node = self.new_node(key, height);
         for i in 0..height {
-            let prev_i = unsafe { &mut *(prev[i] as *mut Node<Key>) };
-            new_node.no_barrier_set_next(i, prev_i.no_barrier_next(i));
-            prev_i.set_next(i, new_node);
+            unsafe {
+                let prev_i = &mut *(prev[i] as *mut Node<Key>);
+                // no need to use barrier now, it happens later
+                new_node.no_barrier_set_next(i, prev_i.no_barrier_next(i));
+                prev_i.set_next(i, new_node);
+            }
         }
-    }
-
-    pub fn contains(&self, key: &Key) -> bool {
-        let result = self.find_greater_or_equal(key, None);
-        !result.is_null() && self.equal(unsafe { result.as_ref().unwrap() }.key(), key)
     }
 
     fn get_max_height(&self) -> usize {
-        self.max_height.load(atomic::Ordering::Relaxed)
+        self.max_height.load(atomic::Ordering::Acquire)
     }
 
     fn new_node(&mut self, key: Key, height: usize) -> &mut Node<Key> {
         let node_memory = self.arena.allocate_aligned(
-            size_of::<Node<Key>>() + size_of::<AtomicPtr<Node<Key>>>() * (height - 1),
+            mem::size_of::<Node<Key>>() + mem::size_of::<AtomicPtr<Node<Key>>>() * (height - 1),
         ) as *mut Node<Key>;
         let node_ref = unsafe { &mut *node_memory };
         node_ref.key = key;
@@ -123,33 +114,29 @@ impl<Key, C: KeyComparator<Key>> SkipList<Key, C> {
         height
     }
 
-    fn equal(&self, a: &Key, b: &Key) -> bool {
-        self.comparator.compare(a, b) == cmp::Ordering::Equal
-    }
-
-    // Return the earliest node that comes at or after key.
+    /// Return the earliest node that comes at or after the key.
     fn find_greater_or_equal(
         &self,
         key: &Key,
         mut prev: Option<&mut [*const Node<Key>]>,
     ) -> *const Node<Key> {
-        let mut result = self.head;
+        let mut current = self.head;
         let mut level = self.get_max_height() - 1;
         loop {
-            let next = unsafe { result.as_ref().unwrap() }.next(level);
+            let next = unsafe { current.as_ref().unwrap().next(level) };
             if !next.is_null()
                 && self
                     .comparator
                     .compare(unsafe { next.as_ref().unwrap() }.key(), key)
                     == cmp::Ordering::Less
             {
-                result = next;
+                current = next;
             } else {
                 if let Some(ref mut prev) = prev {
-                    prev[level] = result;
+                    prev[level] = current;
                 }
                 if level == 0 {
-                    break unsafe { result.as_ref().unwrap() }.next(0);
+                    break unsafe { current.as_ref().unwrap().next(0) };
                 } else {
                     level -= 1;
                 }
@@ -159,20 +146,20 @@ impl<Key, C: KeyComparator<Key>> SkipList<Key, C> {
 
     // Return the latest node with a key < key.
     fn find_less(&self, key: &Key) -> *const Node<Key> {
-        let mut result = self.head;
+        let mut current = self.head;
         let mut level = self.get_max_height() - 1;
         loop {
-            let next = unsafe { result.as_ref().unwrap() }.next(level);
+            let next = unsafe { current.as_ref().unwrap().next(level) };
             if !next.is_null()
                 && self
                     .comparator
                     .compare(unsafe { next.as_ref().unwrap() }.key(), key)
                     == cmp::Ordering::Less
             {
-                result = next;
+                current = next;
             } else {
                 if level == 0 {
-                    break result;
+                    break current;
                 } else {
                     level -= 1;
                 }
@@ -182,20 +169,30 @@ impl<Key, C: KeyComparator<Key>> SkipList<Key, C> {
 
     // Return head_ if list is empty.
     fn find_last(&self) -> *const Node<Key> {
-        let mut result = self.head;
+        let mut current = self.head;
         let mut level = self.get_max_height() - 1;
         loop {
-            let next = unsafe { result.as_ref().unwrap() }.next(level);
+            let next = unsafe { current.as_ref().unwrap().next(level) };
             if !next.is_null() {
-                result = next;
+                current = next;
             } else {
                 if level == 0 {
-                    break result;
+                    break current;
                 } else {
                     level -= 1;
                 }
             }
         }
+    }
+
+    #[cfg(test)]
+    pub fn contains(&self, key: &Key) -> bool {
+        let result = self.find_greater_or_equal(key, None);
+        !result.is_null()
+            && self
+                .comparator
+                .compare(unsafe { result.as_ref().unwrap() }.key(), key)
+                == cmp::Ordering::Equal
     }
 }
 
@@ -206,7 +203,10 @@ pub struct SkipListIterator<'a, Key, C: KeyComparator<Key>> {
 
 impl<'a, Key, C: KeyComparator<Key>> SkipListIterator<'a, Key, C> {
     pub fn new(list: &'a SkipList<Key, C>) -> Self {
-        Self { list, node: null() }
+        Self {
+            list,
+            node: ptr::null(),
+        }
     }
 
     pub fn valid(&self) -> bool {
@@ -218,15 +218,15 @@ impl<'a, Key, C: KeyComparator<Key>> SkipListIterator<'a, Key, C> {
     }
 
     pub fn next(&mut self) {
-        self.node = unsafe { self.node.as_ref().unwrap() }.next(0)
+        self.node = unsafe { self.node.as_ref().unwrap().next(0) }
     }
 
     pub fn prev(&mut self) {
         self.node = self
             .list
             .find_less(unsafe { self.node.as_ref().unwrap() }.key());
-        if self.node as usize == self.list.head as usize {
-            self.node = null();
+        if self.node == self.list.head {
+            self.node = ptr::null();
         }
     }
 
@@ -235,13 +235,13 @@ impl<'a, Key, C: KeyComparator<Key>> SkipListIterator<'a, Key, C> {
     }
 
     pub fn seek_to_first(&mut self) {
-        self.node = unsafe { self.list.head.as_ref().unwrap() }.next(0)
+        self.node = unsafe { self.list.head.as_ref().unwrap().next(0) }
     }
 
     pub fn seek_to_last(&mut self) {
         self.node = self.list.find_last();
-        if self.node as usize == self.list.head as usize {
-            self.node = null();
+        if self.node == self.list.head {
+            self.node = ptr::null();
         }
     }
 }
@@ -250,13 +250,12 @@ impl<'a, Key, C: KeyComparator<Key>> SkipListIterator<'a, Key, C> {
 mod tests {
     use std::collections::BTreeSet;
 
+    use super::{KeyComparator, SkipList};
     use crate::{memtable::skiplist::SkipListIterator, util::Random};
 
-    use super::{KeyComparator, SkipList};
+    struct U8Comparator {}
 
-    struct TestComparator {}
-
-    impl KeyComparator<u64> for TestComparator {
+    impl KeyComparator<u64> for U8Comparator {
         fn compare(&self, a: &u64, b: &u64) -> std::cmp::Ordering {
             a.cmp(b)
         }
@@ -264,8 +263,7 @@ mod tests {
 
     #[test]
     fn test_skiplist_empty() {
-        let cmp = TestComparator {};
-        let list = SkipList::new(cmp, 0);
+        let list = SkipList::new(U8Comparator {}, 0);
         assert!(!list.contains(&10));
         let mut iter = SkipListIterator::new(&list);
         assert!(!iter.valid());
@@ -283,8 +281,7 @@ mod tests {
         const R: u64 = 5000;
         let mut rnd = Random::new(1000);
         let mut keys = BTreeSet::new();
-        let cmp = TestComparator {};
-        let mut list = SkipList::new(cmp, 0);
+        let mut list = SkipList::new(U8Comparator {}, 0);
         for _ in 0..N {
             let key = rnd.next() as u64 % R;
             if keys.insert(key) {

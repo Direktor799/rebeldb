@@ -74,9 +74,10 @@ impl FilterPolicy for BloomFilterPolicy {
 
 #[cfg(test)]
 mod tests {
+    use std::{iter, mem::size_of, slice};
+
     use super::{BloomFilterPolicy, FilterPolicy};
     use crate::util::encode_fixed32;
-    use std::{iter, mem::size_of, slice};
 
     struct BloomTest {
         policy: Box<dyn FilterPolicy>,

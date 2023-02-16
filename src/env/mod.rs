@@ -1,5 +1,6 @@
-use crate::util::Result;
 use std::{ffi::OsString, sync::Arc};
+
+use crate::util::Result;
 
 mod posix_env;
 

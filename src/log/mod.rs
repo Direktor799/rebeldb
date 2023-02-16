@@ -37,10 +37,6 @@ const HEADER_SIZE: usize = 4 + 2 + 1;
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        env::{SequentialFile, WritableFile},
-        util::{crc32c, crc32c_mask, encode_fixed32, DBError, Random, Result},
-    };
     use std::{
         cell::RefCell,
         mem::{size_of, size_of_val},
@@ -48,6 +44,10 @@ mod tests {
     };
 
     use super::{reader::Reporter, *};
+    use crate::{
+        env::{SequentialFile, WritableFile},
+        util::{crc32c, crc32c_mask, encode_fixed32, DBError, Random, Result},
+    };
 
     fn big_string(partial_string: &[u8], n: usize) -> Vec<u8> {
         partial_string.iter().cycle().take(n).cloned().collect()

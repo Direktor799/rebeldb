@@ -21,8 +21,6 @@ impl Arena {
     }
 
     pub fn allocate(&mut self, bytes: usize) -> *mut u8 {
-        // no 0-byte allocations
-        assert!(bytes > 0);
         if bytes <= self.alloc_bytes_remaining {
             let result = self.alloc_ptr;
             self.alloc_ptr = unsafe { self.alloc_ptr.add(bytes) };
@@ -40,15 +38,14 @@ impl Arena {
         } else {
             align - current_mod
         };
-        if slop + bytes <= self.alloc_bytes_remaining {
+        let needed = slop + bytes;
+        if needed <= self.alloc_bytes_remaining {
             let result = unsafe { self.alloc_ptr.add(slop) };
-            self.alloc_ptr = unsafe { self.alloc_ptr.add(slop + bytes) };
-            self.alloc_bytes_remaining -= slop + bytes;
+            self.alloc_ptr = unsafe { self.alloc_ptr.add(needed) };
+            self.alloc_bytes_remaining -= needed;
             return result;
         }
         let result = self.allocate_fallback(bytes);
-        // alignment should be OK, but no guarantee
-        assert!(result as usize & (align - 1) == 0);
         result
     }
 

@@ -1,10 +1,8 @@
 use std::{cmp::Ordering, intrinsics::copy_nonoverlapping, io::BufRead, ptr::null_mut, slice};
 
 use crate::util::{
-    decode_fixed64, encode_fixed64, encode_varint32, put_fixed64, Comparator, FilterPolicy,
+    decode_fixed64, encode_fixed64, encode_varint32, extend_fixed64, Comparator, FilterPolicy,
 };
-
-pub type SequenceNumber = u64;
 
 pub const MAX_SEQUENCE_NUMBER: u64 = (1 << 56) - 1;
 
@@ -29,12 +27,12 @@ pub const VALUE_TYPE_FOR_SEEK: ValueType = ValueType::Value;
 
 pub struct ParsedInternalKey<'a> {
     user_key: &'a [u8],
-    sequence: SequenceNumber,
+    sequence: u64,
     type_: ValueType,
 }
 
 impl<'a> ParsedInternalKey<'a> {
-    pub fn new(user_key: &'a [u8], sequence: SequenceNumber, type_: ValueType) -> Self {
+    pub fn new(user_key: &'a [u8], sequence: u64, type_: ValueType) -> Self {
         Self {
             user_key,
             sequence,
@@ -59,7 +57,7 @@ impl<'a> ParsedInternalKey<'a> {
     /// Append the serialization of "key" to dst.
     pub fn append_to(&self, dst: &mut Vec<u8>) {
         dst.extend_from_slice(self.user_key);
-        put_fixed64(dst, self.sequence << 8 | self.type_ as u64);
+        extend_fixed64(dst, self.sequence << 8 | self.type_ as u64);
     }
 
     pub fn user_key(&self) -> &[u8] {
@@ -76,10 +74,10 @@ impl<'a> ParsedInternalKey<'a> {
 }
 
 fn extract_user_key(internal_key: &[u8]) -> &[u8] {
-    assert!(internal_key.len() >= 8);
     &internal_key[..internal_key.len() - 8]
 }
 
+/// TODO: maybe make it a template?
 pub struct InternalKeyComparator {
     user_comparator: Box<dyn Comparator>,
 }
@@ -127,7 +125,7 @@ impl Comparator for InternalKeyComparator {
         {
             // User key has become shorter physically, but larger logically.
             // Tack on the earliest possible number to the shortened user key.
-            put_fixed64(
+            extend_fixed64(
                 &mut result,
                 MAX_SEQUENCE_NUMBER << 8 | VALUE_TYPE_FOR_SEEK as u64,
             );
@@ -147,7 +145,7 @@ impl Comparator for InternalKeyComparator {
         {
             // User key has become shorter physically, but larger logically.
             // Tack on the earliest possible number to the shortened user key.
-            put_fixed64(
+            extend_fixed64(
                 &mut result,
                 MAX_SEQUENCE_NUMBER << 8 | VALUE_TYPE_FOR_SEEK as u64,
             );
@@ -197,7 +195,7 @@ impl InternalKey {
         Self { rep: vec![] }
     }
 
-    pub fn new(user_key: &[u8], seq: SequenceNumber, type_: ValueType) -> Self {
+    pub fn new(user_key: &[u8], seq: u64, type_: ValueType) -> Self {
         let mut rep = vec![];
         ParsedInternalKey::new(user_key, seq, type_).append_to(&mut rep);
         Self { rep }
@@ -233,23 +231,18 @@ pub struct LookupKey {
 }
 
 impl LookupKey {
-    pub fn new(user_key: &[u8], sequence: SequenceNumber) -> Self {
+    pub fn new(user_key: &[u8], sequence: u64) -> Self {
         let ksize = user_key.len();
         let needed = ksize + 13;
-        let mut result = if needed <= LOOKUP_KEY_STACK_SPACE {
-            Self {
-                start: null_mut(),
-                kstart: null_mut(),
-                end: null_mut(),
-                space: LookupKeyInner::OnStack([0; LOOKUP_KEY_STACK_SPACE]),
-            }
-        } else {
-            Self {
-                start: null_mut(),
-                kstart: null_mut(),
-                end: null_mut(),
-                space: LookupKeyInner::OnHeap(vec![0; needed]),
-            }
+        let mut result = Self {
+            start: null_mut(),
+            kstart: null_mut(),
+            end: null_mut(),
+            space: if needed <= LOOKUP_KEY_STACK_SPACE {
+                LookupKeyInner::OnStack([0; LOOKUP_KEY_STACK_SPACE])
+            } else {
+                LookupKeyInner::OnHeap(vec![0; needed])
+            },
         };
         result.start = match result.space {
             LookupKeyInner::OnStack(mut data) => data.as_mut_ptr(),
@@ -286,14 +279,13 @@ impl LookupKey {
 
 #[cfg(test)]
 mod tests {
+    use super::{InternalKey, InternalKeyComparator, ParsedInternalKey, ValueType};
     use crate::{
         dbformat::{MAX_SEQUENCE_NUMBER, VALUE_TYPE_FOR_SEEK},
         util::{BytewiseComparator, Comparator},
     };
 
-    use super::{InternalKey, InternalKeyComparator, ParsedInternalKey, SequenceNumber, ValueType};
-
-    fn ikey(user_key: &[u8], seq: SequenceNumber, type_: ValueType) -> Vec<u8> {
+    fn ikey(user_key: &[u8], seq: u64, type_: ValueType) -> Vec<u8> {
         let mut encoded = vec![];
         ParsedInternalKey::new(user_key, seq, type_).append_to(&mut encoded);
         encoded
@@ -308,7 +300,7 @@ mod tests {
         InternalKeyComparator::new(Box::new(BytewiseComparator::new())).find_short_successor(short)
     }
 
-    fn test_key(user_key: &[u8], seq: SequenceNumber, type_: ValueType) {
+    fn test_key(user_key: &[u8], seq: u64, type_: ValueType) {
         let encoded = ikey(user_key, seq, type_);
         let decoded = ParsedInternalKey::parse(&encoded).unwrap();
         assert_eq!(user_key, decoded.user_key);

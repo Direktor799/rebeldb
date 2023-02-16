@@ -7,4 +7,6 @@ mod memtable;
 mod util;
 mod write_batch;
 
+// tmp
+pub use memtable::MemTable;
 use util::{DBError, Result};

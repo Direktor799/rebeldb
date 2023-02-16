@@ -1,36 +1,5 @@
 use std::{intrinsics::copy_nonoverlapping, mem::size_of};
 
-// Only put_* modify the input, encode_* and decode_* do NOT
-
-pub fn put_fixed32(dst: &mut Vec<u8>, value: u32) {
-    let mut buf = [0u8; size_of::<u32>()];
-    encode_fixed32(&mut buf, value);
-    dst.extend_from_slice(&buf);
-}
-
-pub fn put_fixed64(dst: &mut Vec<u8>, value: u64) {
-    let mut buf = [0u8; size_of::<u64>()];
-    encode_fixed64(&mut buf, value);
-    dst.extend_from_slice(&buf);
-}
-
-pub fn put_varint32(dst: &mut Vec<u8>, value: u32) {
-    let mut buf = [0u8; 5];
-    let len = encode_varint32(&mut buf, value);
-    dst.extend_from_slice(&buf[..len]);
-}
-
-pub fn put_varint64(dst: &mut Vec<u8>, value: u64) {
-    let mut buf = [0u8; 10];
-    let len = encode_varint64(&mut buf, value);
-    dst.extend_from_slice(&buf[..len]);
-}
-
-pub fn put_length_prefixed_slice(dst: &mut Vec<u8>, value: &[u8]) {
-    put_varint32(dst, value.len() as u32);
-    dst.extend_from_slice(value);
-}
-
 pub fn encode_fixed32(dst: &mut [u8], value: u32) {
     unsafe {
         let bytes = value.to_le_bytes();
@@ -45,6 +14,7 @@ pub fn encode_fixed64(dst: &mut [u8], value: u64) {
     }
 }
 
+/// Return the index after encoded data
 pub fn encode_varint32(dst: &mut [u8], value: u32) -> usize {
     const B: u32 = 128;
     let mut index = 0;
@@ -77,6 +47,7 @@ pub fn encode_varint32(dst: &mut [u8], value: u32) -> usize {
     index
 }
 
+/// Return the index after encoded data
 pub fn encode_varint64(dst: &mut [u8], mut value: u64) -> usize {
     const B: u64 = 128;
     let mut index = 0;
@@ -129,8 +100,37 @@ pub fn decode_varint64(input: &[u8]) -> Option<(u64, usize)> {
     None
 }
 
+pub fn extend_fixed32(dst: &mut Vec<u8>, value: u32) {
+    let mut buf = [0u8; size_of::<u32>()];
+    encode_fixed32(&mut buf, value);
+    dst.extend_from_slice(&buf);
+}
+
+pub fn extend_fixed64(dst: &mut Vec<u8>, value: u64) {
+    let mut buf = [0u8; size_of::<u64>()];
+    encode_fixed64(&mut buf, value);
+    dst.extend_from_slice(&buf);
+}
+
+pub fn extend_varint32(dst: &mut Vec<u8>, value: u32) {
+    let mut buf = [0u8; 5];
+    let len = encode_varint32(&mut buf, value);
+    dst.extend_from_slice(&buf[..len]);
+}
+
+pub fn extend_varint64(dst: &mut Vec<u8>, value: u64) {
+    let mut buf = [0u8; 10];
+    let len = encode_varint64(&mut buf, value);
+    dst.extend_from_slice(&buf[..len]);
+}
+
+pub fn extend_size_prefixed_slice(dst: &mut Vec<u8>, value: &[u8]) {
+    extend_varint32(dst, value.len() as u32);
+    dst.extend_from_slice(value);
+}
+
 /// Return Some(result, remain) if success
-pub fn decode_length_prefixed_slice(input: &[u8]) -> Option<(&[u8], usize)> {
+pub fn decode_size_prefixed_slice(input: &[u8]) -> Option<(&[u8], usize)> {
     let (len, offset) = decode_varint32(input)?;
     if offset + len as usize <= input.len() {
         let result = &input[offset..offset + len as usize];
@@ -140,7 +140,8 @@ pub fn decode_length_prefixed_slice(input: &[u8]) -> Option<(&[u8], usize)> {
     }
 }
 
-pub fn varint_length(mut value: u64) -> usize {
+/// Get byte size of a varint
+pub fn varint_size(mut value: u64) -> usize {
     let mut len = 1;
     while value >= 128 {
         value >>= 7;
@@ -151,14 +152,15 @@ pub fn varint_length(mut value: u64) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::{mem::size_of, str};
+
+    use super::*;
 
     #[test]
     fn test_coding_fixed32() {
         let mut s = vec![];
         for v in 0..100000 {
-            put_fixed32(&mut s, v);
+            extend_fixed32(&mut s, v);
         }
         let mut i = 0;
         for v in 0..100000 {
@@ -173,9 +175,9 @@ mod tests {
         let mut s = vec![];
         for power in 0..63 {
             let v = 1u64 << power;
-            put_fixed64(&mut s, v - 1);
-            put_fixed64(&mut s, v + 0);
-            put_fixed64(&mut s, v + 1);
+            extend_fixed64(&mut s, v - 1);
+            extend_fixed64(&mut s, v + 0);
+            extend_fixed64(&mut s, v + 1);
         }
 
         let mut i = 0;
@@ -196,14 +198,14 @@ mod tests {
     #[test]
     fn test_coding_encoding_output() {
         let mut s = vec![];
-        put_fixed32(&mut s, 0x04030201);
+        extend_fixed32(&mut s, 0x04030201);
         assert_eq!(4, s.len());
         assert_eq!(0x01, s[0]);
         assert_eq!(0x02, s[1]);
         assert_eq!(0x03, s[2]);
         assert_eq!(0x04, s[3]);
         s.clear();
-        put_fixed64(&mut s, 0x0807060504030201);
+        extend_fixed64(&mut s, 0x0807060504030201);
         assert_eq!(8, s.len());
         assert_eq!(0x01, s[0]);
         assert_eq!(0x02, s[1]);
@@ -220,7 +222,7 @@ mod tests {
         let mut s = vec![];
         for i in 0..32 * 32 {
             let v = (i / 32) << (i % 32);
-            put_varint32(&mut s, v);
+            extend_varint32(&mut s, v);
         }
 
         let mut index = 0;
@@ -228,7 +230,7 @@ mod tests {
             let expected = (i / 32) << (i % 32);
             let (actual, offset) = decode_varint32(&s[index..]).unwrap();
             assert_eq!(expected, actual);
-            assert_eq!(varint_length(actual as u64), offset);
+            assert_eq!(varint_size(actual as u64), offset);
             index += offset;
         }
         assert_eq!(index, s.len());
@@ -253,7 +255,7 @@ mod tests {
 
         let mut s = vec![];
         for &value in &values {
-            put_varint64(&mut s, value);
+            extend_varint64(&mut s, value);
         }
 
         let mut index = 0;
@@ -261,7 +263,7 @@ mod tests {
             assert!(index < s.len());
             let (actual, offset) = decode_varint64(&s[index..]).unwrap();
             assert_eq!(value, actual);
-            assert_eq!(varint_length(actual), offset);
+            assert_eq!(varint_size(actual), offset);
             index += offset;
         }
         assert_eq!(index, s.len());
@@ -277,7 +279,7 @@ mod tests {
     fn test_coding_varint32_truncation() {
         let large_value = (1 << 31) + 100;
         let mut s = vec![];
-        put_varint32(&mut s, large_value);
+        extend_varint32(&mut s, large_value);
         for len in 0..s.len() - 1 {
             assert!(decode_varint32(&s[..len]).is_none());
         }
@@ -296,7 +298,7 @@ mod tests {
     fn test_coding_varint64_truncation() {
         let large_value = (1 << 63) + 100;
         let mut s = vec![];
-        put_varint64(&mut s, large_value);
+        extend_varint64(&mut s, large_value);
         for len in 0..s.len() - 1 {
             assert!(decode_varint64(&s[..len]).is_none());
         }
@@ -306,22 +308,22 @@ mod tests {
     #[test]
     fn test_coding_strings() {
         let mut s = vec![];
-        put_length_prefixed_slice(&mut s, &"".as_bytes());
-        put_length_prefixed_slice(&mut s, &"foo".as_bytes());
-        put_length_prefixed_slice(&mut s, &"bar".as_bytes());
-        put_length_prefixed_slice(&mut s, &(vec![b'x'; 200].as_slice()));
+        extend_size_prefixed_slice(&mut s, &"".as_bytes());
+        extend_size_prefixed_slice(&mut s, &"foo".as_bytes());
+        extend_size_prefixed_slice(&mut s, &"bar".as_bytes());
+        extend_size_prefixed_slice(&mut s, &(vec![b'x'; 200].as_slice()));
 
         let mut offset = 0;
-        let (result, len) = decode_length_prefixed_slice(&s[offset..]).unwrap();
+        let (result, len) = decode_size_prefixed_slice(&s[offset..]).unwrap();
         offset += len;
         assert_eq!(str::from_utf8(&result).unwrap(), "");
-        let (result, len) = decode_length_prefixed_slice(&s[offset..]).unwrap();
+        let (result, len) = decode_size_prefixed_slice(&s[offset..]).unwrap();
         offset += len;
         assert_eq!(str::from_utf8(&result).unwrap(), "foo");
-        let (result, len) = decode_length_prefixed_slice(&s[offset..]).unwrap();
+        let (result, len) = decode_size_prefixed_slice(&s[offset..]).unwrap();
         offset += len;
         assert_eq!(str::from_utf8(&result).unwrap(), "bar");
-        let (result, len) = decode_length_prefixed_slice(&s[offset..]).unwrap();
+        let (result, len) = decode_size_prefixed_slice(&s[offset..]).unwrap();
         offset += len;
         assert_eq!(
             str::from_utf8(&result).unwrap(),

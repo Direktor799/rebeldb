@@ -1,6 +1,3 @@
-use super::{Env, FileLock, Logger, RandomAccessFile, SequentialFile, WritableFile};
-use crate::util::{DBError, Result};
-use chrono::Local;
 use std::{
     cell::RefCell,
     ffi::OsString,
@@ -12,6 +9,11 @@ use std::{
     thread::{self, ThreadId},
     time,
 };
+
+use chrono::Local;
+
+use super::{Env, FileLock, Logger, RandomAccessFile, SequentialFile, WritableFile};
+use crate::util::{DBError, Result};
 
 pub struct PosixEnv {}
 

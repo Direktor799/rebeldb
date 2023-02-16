@@ -35,7 +35,7 @@ impl Comparator for BytewiseComparator {
         let diff_index = (0..min_length).find(|&index| result[index] != limit[index]);
         if let Some(diff_index) = diff_index {
             let diff_byte = result[diff_index];
-            if diff_byte < 0xff && diff_byte + 1 < limit[diff_index] {
+            if diff_byte < u8::MAX && diff_byte + 1 < limit[diff_index] {
                 result[diff_index] = result[diff_index] + 1;
                 result.resize(diff_index + 1, Default::default());
             }

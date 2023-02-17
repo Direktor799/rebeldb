@@ -1,9 +1,7 @@
 // TODO: refactor this later
-use std::{error::Error, fmt::Display};
+use std::{error, fmt::Display};
 
-use thiserror::Error;
-
-#[derive(Debug, Clone, PartialEq, Error)]
+#[derive(Debug, Clone, PartialEq)]
 enum Code {
     NotFound = 1,
     Corruption = 2,
@@ -26,12 +24,12 @@ impl Display for Code {
 }
 
 #[derive(Debug, Clone)]
-pub struct DBError {
+pub struct Error {
     code: Code,
     msg: String,
 }
 
-impl DBError {
+impl Error {
     pub fn not_found(msg: &str) -> Self {
         Self {
             code: Code::NotFound,
@@ -88,20 +86,20 @@ impl DBError {
     }
 }
 
-impl Display for DBError {
+impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}: {}", self.code.to_string(), self.msg))
     }
 }
 
-impl Error for DBError {}
+impl error::Error for Error {}
 
-pub type Result<T> = std::result::Result<T, DBError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
     use super::Result;
-    use crate::util::result::DBError;
+    use crate::util::result::Error;
 
     #[test]
     fn test_result_move() {
@@ -109,7 +107,7 @@ mod tests {
         let ok2 = ok;
         assert!(ok2.is_ok());
 
-        let status: Result<()> = Err(DBError::not_found("custom NotFound message"));
+        let status: Result<()> = Err(Error::not_found("custom NotFound message"));
         let status2 = status;
         let error = status2.unwrap_err();
         assert!(error.is_not_found());

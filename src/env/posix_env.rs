@@ -13,7 +13,7 @@ use std::{
 use chrono::Local;
 
 use super::{Env, FileLock, Logger, RandomAccessFile, SequentialFile, WritableFile};
-use crate::util::{DBError, Result};
+use crate::util::{Error, Result};
 
 pub struct PosixEnv {}
 
@@ -106,11 +106,11 @@ impl Env for PosixEnv {
     }
 }
 
-fn to_db_error(target: &str, error: io::Error) -> DBError {
+fn to_db_error(target: &str, error: io::Error) -> Error {
     let msg = format!("{}: {}", target, &error.to_string());
     match error.kind() {
-        io::ErrorKind::NotFound => DBError::not_found(&msg),
-        _ => DBError::io_error(&msg),
+        io::ErrorKind::NotFound => Error::not_found(&msg),
+        _ => Error::io_error(&msg),
     }
 }
 

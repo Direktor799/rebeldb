@@ -12,7 +12,7 @@ use crate::{
     iterator::Iterator,
     util::{
         decode_fixed64, decode_varint32, encode_fixed64, encode_varint32, extend_varint32,
-        varint_size, Comparator, DBError, Result,
+        varint_size, Comparator, Error, Result,
     },
 };
 
@@ -189,7 +189,7 @@ impl MemTable {
                         return Some(Ok(value.to_vec()));
                     }
                     ValueType::Deletion => {
-                        return Some(Err(DBError::not_found("")));
+                        return Some(Err(Error::not_found("")));
                     }
                 }
             }

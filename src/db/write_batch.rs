@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::{
     dbformat::ValueType,
     memtable::MemTable,
@@ -5,11 +7,12 @@ use crate::{
         decode_fixed32, decode_fixed64, decode_size_prefixed_slice, encode_fixed32, encode_fixed64,
         extend_size_prefixed_slice,
     },
-    DBError, Result,
+    Error, Result,
 };
 
 /// WriteBatch header has an 8-byte sequence number followed by a 4-byte count.
 const HEADER_SIZE: usize = 12;
+const SEQ_SIZE: usize = mem::size_of::<u64>();
 
 pub trait WriteBatchHandler {
     fn put(&mut self, key: &[u8], value: &[u8]);
@@ -39,7 +42,7 @@ impl<'a> WriteBatchHandler for MemTableInserter<'a> {
     }
 }
 
-struct WriteBatch {
+pub struct WriteBatch {
     rep: Vec<u8>,
 }
 
@@ -74,13 +77,12 @@ impl WriteBatch {
 
     pub fn append(&mut self, source: &WriteBatch) {
         self.set_count(self.count() + source.count());
-        assert!(self.rep.len() >= HEADER_SIZE);
         self.rep.extend_from_slice(&source.rep[HEADER_SIZE..]);
     }
 
     pub fn iterate(&self, mut handler: Box<dyn WriteBatchHandler + '_>) -> Result<()> {
         if self.rep.len() < HEADER_SIZE {
-            return Err(DBError::corruption("malformed WriteBatch (too small)"));
+            return Err(Error::corruption("malformed WriteBatch (too small)"));
         }
 
         let mut index = HEADER_SIZE;
@@ -96,14 +98,14 @@ impl WriteBatch {
                             index += offset;
                             key
                         }
-                        None => return Err(DBError::corruption("bad WriteBatch Put")),
+                        None => return Err(Error::corruption("bad WriteBatch Put")),
                     };
                     let value = match decode_size_prefixed_slice(&self.rep[index..]) {
                         Some((value, offset)) => {
                             index += offset;
                             value
                         }
-                        None => return Err(DBError::corruption("bad WriteBatch Put")),
+                        None => return Err(Error::corruption("bad WriteBatch Put")),
                     };
                     handler.put(key, value);
                 }
@@ -113,7 +115,7 @@ impl WriteBatch {
                             index += offset;
                             key
                         }
-                        None => return Err(DBError::corruption("bad WriteBatch Delete")),
+                        None => return Err(Error::corruption("bad WriteBatch Delete")),
                     };
                     handler.delete(key);
                 }
@@ -121,26 +123,26 @@ impl WriteBatch {
         }
 
         if found != self.count() {
-            Err(DBError::corruption("WriteBatch has wrong count"))
+            Err(Error::corruption("WriteBatch has wrong count"))
         } else {
             Ok(())
         }
     }
 
     pub(crate) fn count(&self) -> u32 {
-        decode_fixed32(&self.rep[8..])
+        decode_fixed32(&self.rep[SEQ_SIZE..HEADER_SIZE])
     }
 
     pub(crate) fn set_count(&mut self, n: u32) {
-        encode_fixed32(&mut self.rep[8..], n)
+        encode_fixed32(&mut self.rep[SEQ_SIZE..HEADER_SIZE], n)
     }
 
     pub(crate) fn sequence(&self) -> u64 {
-        decode_fixed64(&self.rep)
+        decode_fixed64(&self.rep[..SEQ_SIZE])
     }
 
     pub(crate) fn set_sequence(&mut self, seq: u64) {
-        encode_fixed64(&mut self.rep, seq)
+        encode_fixed64(&mut self.rep[..SEQ_SIZE], seq)
     }
 
     pub(crate) fn contents(&self) -> &[u8] {

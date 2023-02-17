@@ -34,11 +34,13 @@ impl FilterPolicy for BloomFilterPolicy {
         let bytes = (bits + 7) / 8;
         let bits = bytes * 8;
         let init_size = dst.len();
+
         dst.resize(init_size + bytes, 0);
+        // # of probes
         dst.push(self.k as u8);
         let array = &mut dst[init_size..];
         for key in keys {
-            let mut h = BloomFilterPolicy::bloom_hash(key);
+            let mut h = Self::bloom_hash(key);
             let delta = (h >> 17) | (h << 15);
             for _ in 0..self.k {
                 let bitpos = h as usize % bits;
@@ -49,17 +51,17 @@ impl FilterPolicy for BloomFilterPolicy {
     }
 
     fn key_may_match(&self, key: &[u8], filter: &[u8]) -> bool {
-        let len = filter.len();
-        if len < 2 {
+        if filter.len() < 2 {
             return false;
         }
-        let bits = (len - 1) * 8;
-        let k = filter[len - 1];
+        let bits = (filter.len() - 1) * 8;
+        let k = *filter.last().unwrap();
         if k > 30 {
+            // Reserved for potentially new encodings for short bloom filters.
             return true;
         }
 
-        let mut h = BloomFilterPolicy::bloom_hash(key);
+        let mut h = Self::bloom_hash(key);
         let delta = (h >> 17) | (h << 15);
         for _ in 0..k {
             let bitpos = h as usize % bits;
@@ -68,6 +70,7 @@ impl FilterPolicy for BloomFilterPolicy {
             }
             h = h.wrapping_add(delta);
         }
+
         true
     }
 }

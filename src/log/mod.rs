@@ -46,7 +46,7 @@ mod tests {
     use super::{reader::Reporter, *};
     use crate::{
         env::{SequentialFile, WritableFile},
-        util::{crc32c, crc32c_mask, encode_fixed32, DBError, Random, Result},
+        util::{crc32c, crc32c_mask, encode_fixed32, Error, Random, Result},
     };
 
     fn big_string(partial_string: &[u8], n: usize) -> Vec<u8> {
@@ -287,7 +287,7 @@ mod tests {
             if self.force_error {
                 self.force_error = false;
                 self.returned_partial = true;
-                return Err(DBError::corruption("read error"));
+                return Err(Error::corruption("read error"));
             }
             let read_size = if self.contents.len() < dst.len() {
                 self.returned_partial = true;
@@ -303,7 +303,7 @@ mod tests {
         fn skip(&mut self, n: usize) -> Result<()> {
             if n > self.contents.len() {
                 self.contents.clear();
-                Err(DBError::not_found("in-memory file skipped past end"))
+                Err(Error::not_found("in-memory file skipped past end"))
             } else {
                 self.contents = self.contents[n..].to_vec();
                 Ok(())
@@ -326,7 +326,7 @@ mod tests {
     }
 
     impl Reporter for ReportCollector {
-        fn corruption(&mut self, bytes: usize, error: &crate::util::DBError) {
+        fn corruption(&mut self, bytes: usize, error: &crate::util::Error) {
             self.dropped_bytes += bytes;
             self.message.push_str(&error.to_string());
         }

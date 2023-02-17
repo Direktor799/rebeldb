@@ -3,7 +3,7 @@ use std::{cell::RefCell, ops::Range, rc::Rc, slice::from_raw_parts};
 use super::{RecordType, BLOCK_SIZE, HEADER_SIZE};
 use crate::{
     env::SequentialFile,
-    util::{crc32c, crc32c_unmask, decode_fixed32, DBError},
+    util::{crc32c, crc32c_unmask, decode_fixed32, Error},
 };
 
 #[derive(Debug)]
@@ -280,10 +280,10 @@ impl Reader {
     }
 
     fn report_corruption(&mut self, bytes: usize, msg: &str) {
-        self.report_drop(bytes, &DBError::corruption(msg))
+        self.report_drop(bytes, &Error::corruption(msg))
     }
 
-    fn report_drop(&mut self, bytes: usize, reason: &DBError) {
+    fn report_drop(&mut self, bytes: usize, reason: &Error) {
         if self.reporter.is_some()
             && self
                 .end_of_buffer_offset
@@ -300,5 +300,5 @@ impl Reader {
 }
 
 pub trait Reporter {
-    fn corruption(&mut self, bytes: usize, error: &DBError);
+    fn corruption(&mut self, bytes: usize, error: &Error);
 }
